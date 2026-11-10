@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>空当接龙 - 完整版</title>
+    <style>
+        body {
+            background-color: #2e8b57; /* 经典的深绿色桌面 */
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* 禁止滚动 */
+            touch-action: none; /* 禁止手机默认触摸行为 */
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        /* 顶部区域：左上角回收区，右上角暂存区 */
+        .top-row {
+            display: flex;
+            justify-content: space-between;
+            height: 18%;
+            margin-bottom: 10px;
+        }
+
+        .pile-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* 牌槽底座 */
+        .slot {
+            width: 12vw; /* 根据屏幕宽度自适应 */
+            max-width: 70px;
+            height: 16vw;
+            max-height: 95px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            position: relative;
+            background-color: rgba(0, 0, 0, 0.1);
+        }
+
+        /* 扑克牌样式 */
+        .card {
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2px;
+            box-sizing: border-box;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            z-index: 10;
+        }
+
+        .card.red { color: red; }
+        .card.black { color: black; }
+
+        .card-top, .card-bottom {
+            font-size: 14px;
+            line-height: 1;
+        }
+        
+        .card-bottom {
+            transform: rotate(180deg);
+        }
+
+        .card-center {
+            font-size: 24px;
+            text-align: center;
+            align-self: center;
+        }
+
+        /* 选中状态 */
+        .card.selected {
+            border: 3px solid yellow;
+            transform: translateY(-5px);
+            z-index: 100;
+        }
+
+        /* 下方主列区域 */
+        .main-columns {
+            display: flex;
+            justify-content: space-between;
+            flex-grow: 1;
+            gap: 5px;
+        }
+
+        .column {
+            width: 12%;
+            position: relative;
+        }
+
+        /* 菜单按钮 */
+        #menu-btn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 5px 15px;
+            background: rgba(255,255,255,0.8);
+            border: none;
+            border-radius: 15px;
+            font-size: 14px;
+            z-index: 200;
+        }
+    </style>
+</head>
+<body>
+
+    <button id="menu-btn" onclick="initGame()">重新开始</button>
+
+    <div id="game-container">
+        <!-- 顶部：左上角4个回收位，右上角4个暂存位 -->
+        <div class="top-row">
+            <!-- 回收区 (Home Cells) -->
+            <div class="pile-group" id="home-cells">
+                <div class="slot" data-type="home" data-index="0" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="home" data-index="1" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="home" data-index="2" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="home" data-index="3" onclick="clickSlot(this)"></div>
+            </div>
+            
+            <!-- 暂存区 (Free Cells) -->
+            <div class="pile-group" id="free-cells">
+                <div class="slot" data-type="free" data-index="0" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="free" data-index="1" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="free" data-index="2" onclick="clickSlot(this)"></div>
+                <div class="slot" data-type="free" data-index="3" onclick="clickSlot(this)"></div>
+            </div>
+        </div>
+
+        <!-- 底部：8列主牌堆 -->
+        <div class="main-columns" id="tableau">
+            <!-- JS会自动生成8列 -->
+        </div>
+    </div>
+
+<script>
+    // 游戏数据结构
+    const suits = ['♠', '♥', '♣', '♦'];
+    const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    
+    let deck = [];
+    let columns = [[], [], [], [], [], [], [], []]; // 8列
+    let freeCells = [null, null, null, null]; // 4个暂存
+    let homeCells = [[], [], [], []]; // 4个回收堆
+
+    let selectedCard = null; // 当前选中的牌
+    let selectedSource = null; // 选中的牌来自哪里 ('col', 'free') 以及索引
+
+    // 初始化游戏
+    function initGame() {
+        // 1. 生成一副牌
+        deck = [];
+        for(let s=0; s<4; s++) {
+            for(let v=0; v<13; v++) {
+                deck.push({
+                    suit: suits[s],
+                    valueIndex: v, // 0-12
+                    valueChar: values[v],
+                    color: (s === 1 || s === 3) ? 'red' : 'black' // 红桃方块是红
+                });
+            }
+        }
+
+        // 2. 洗牌 (Fisher-Yates shuffle)
+        for (let i = deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+
+        // 3. 发牌到8列 (前4列7张，后4列6张)
+        columns = [[], [], [], [], [], [], [], []];
+        freeCells = [null, null, null, null];
+        homeCells = [[], [], [], []];
+        selectedCard = null;
+
+        let cardIdx = 0;
+        for(let i=0; i<8; i++) {
+            let count = (i < 4) ? 7 : 6;
+            for(let j=0; j<count; j++) {
+                columns[i].push(deck[cardIdx++]);
+            }
+        }
+
+        render();
+    }
+
+    // 渲染界面
+    function render() {
+        // 渲染主列
+        const tableauDiv = document.getElementById('tableau');
+        tableauDiv.innerHTML = '';
+        
+        columns.forEach((col, colIndex) => {
+            let colDiv = document.createElement('div');
+            colDiv.className = 'column';
+            colDiv.onclick = (e) => clickColumn(colIndex); // 点击空白处
+            
+            col.forEach((card, cardIndex) => {
+                let cardEl = createCardElement(card);
+                // 层叠效果：每张牌往下移一点
+                cardEl.style.top = (cardIndex * 25) + 'px'; 
+                cardEl.onclick = (e) => {
+                    e.stopPropagation(); // 防止冒泡触发列点击
+                    clickCard(colIndex, cardIndex, 'col');
+                };
+                
+                // 高亮选中
+                if(selectedCard && selectedCard.card === card && selectedSource.type === 'col' && selectedSource.index === colIndex) {
+                     // 简单起见，只高亮被点击的那张，实际应该高亮整叠
+                     cardEl.classList.add('selected');
+                }
+                
+                colDiv.appen
